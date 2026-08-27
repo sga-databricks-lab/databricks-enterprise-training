@@ -1,1 +1,1 @@
-# Databricks Enterprise Training
+# Setup guide & architectural overview
