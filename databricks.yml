@@ -1,0 +1,57 @@
+bundle:
+  name: databricks-enterprise-training
+
+include:
+  - config/targets/*.yml
+
+variables:
+  catalog:
+    description: Target Unity Catalog name
+    default: main
+  schema_bronze:
+    description: Bronze target schema
+    default: bronze
+  schema_silver:
+    description: Silver target schema
+    default: silver
+  schema_gold:
+    description: Gold target schema
+    default: gold
+
+resources:
+  pipelines:
+    silver_dlt_pipeline:
+      name: ${bundle.target}-silver-cleanse-pipeline
+      catalog: ${var.catalog}
+      target: ${var.schema_silver}
+      continuous: true
+      serverless: true
+      libraries:
+        - notebook:
+            path: ./src/03_silver/cleanse_dlt_pipeline.py
+
+  jobs:
+    medallion_orchestrator:
+      name: ${bundle.target}-medallion-pipeline-job
+      tasks:
+        - task_key: stream_simulator
+          spark_python_task:
+            python_file: ./utils/stream_simulator.py
+
+        - task_key: bronze_ingestion
+          depends_on:
+            - task_key: stream_simulator
+          spark_python_task:
+            python_file: ./src/02_bronze/ingest_raw_events.py
+
+        - task_key: gold_aggregations
+          depends_on:
+            - task_key: bronze_ingestion
+          spark_python_task:
+            python_file: ./src/04_gold/aggregate_metrics.py
+
+        - task_key: backup_recovery
+          depends_on:
+            - task_key: gold_aggregations
+          spark_python_task:
+            python_file: ./src/04_gold/backup_recovery.py
