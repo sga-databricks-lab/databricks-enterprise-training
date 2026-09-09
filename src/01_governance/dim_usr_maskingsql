@@ -1,0 +1,78 @@
+-- ============================================================================
+-- COLUMN-LEVEL MASKING FUNCTIONS
+-- ============================================================================
+
+-- 1. Email Masking Function
+CREATE OR REPLACE FUNCTION workspace.default.mask_email(email STRING)
+RETURNS STRING
+COMMENT 'Masks email addresses for ALL users, showing only first 2 chars of username'
+RETURN CASE 
+  WHEN email IS NULL THEN NULL
+  ELSE CONCAT(
+    SUBSTRING(SPLIT(email, '@')[0], 1, 2),
+    '***@',
+    SPLIT(email, '@')[1]
+  )
+END;
+
+-- 2. Credit Card Masking Function
+CREATE OR REPLACE FUNCTION workspace.default.mask_credit_card(card STRING)
+RETURNS STRING
+COMMENT 'Masks credit card numbers for ALL users, showing only last 4 digits'
+RETURN CASE 
+  WHEN card IS NULL THEN NULL
+  ELSE CONCAT('****-****-****-', RIGHT(card, 4))
+END;
+
+-- 3. IP Address Masking Function
+CREATE OR REPLACE FUNCTION workspace.default.mask_ip(ip STRING)
+RETURNS STRING
+COMMENT 'Masks IP addresses for ALL users, showing only first and last octet'
+RETURN CASE 
+  WHEN ip IS NULL THEN NULL
+  ELSE CONCAT(
+    SPLIT(ip, '\\.')[0], '.XXX.XXX.', 
+    SPLIT(ip, '\\.')[3]
+  )
+END;
+
+-- 4. Name Masking Function
+CREATE OR REPLACE FUNCTION workspace.default.mask_name(name STRING)
+RETURNS STRING
+COMMENT 'Masks names for ALL users, showing only first character'
+RETURN CASE 
+  WHEN name IS NULL THEN NULL
+  ELSE CONCAT(SUBSTRING(name, 1, 1), '***')
+END;
+
+-- 5. User ID Partial Masking
+CREATE OR REPLACE FUNCTION workspace.default.mask_user_id(user_id STRING)
+RETURNS STRING
+COMMENT 'Partially masks user IDs for ALL users'
+RETURN CASE 
+  WHEN user_id IS NULL THEN NULL
+  ELSE CONCAT('USR_***', RIGHT(user_id, 2))
+END;
+
+
+-- ============================================================================
+-- APPLY COLUMN MASKS TO USER DIMENSION TABLE
+-- ============================================================================
+-- Apply column-level masks directly to the dim_users table
+-- This ensures ALL users see masked data when querying this table
+
+-- Apply email masking
+ALTER TABLE workspace.default.dim_users 
+ALTER COLUMN email SET MASK workspace.default.mask_email;
+
+-- Apply credit card masking
+ALTER TABLE workspace.default.dim_users 
+ALTER COLUMN credit_card_num SET MASK workspace.default.mask_credit_card;
+
+-- Apply IP address masking
+ALTER TABLE workspace.default.dim_users 
+ALTER COLUMN ip_address SET MASK workspace.default.mask_ip;
+
+-- Apply name masking
+ALTER TABLE workspace.default.dim_users 
+ALTER COLUMN full_name SET MASK workspace.default.mask_name;
