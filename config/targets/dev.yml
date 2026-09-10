@@ -1,1 +1,12 @@
-# Development environment deployment specs
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://dbc-c17268be-1c4c.cloud.databricks.com
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundles/${bundle.name}/${bundle.target}
+    variables:
+      catalog: workspace
+      schema_bronze: dev_bronze
+      schema_silver: dev_silver
+      schema_gold: dev_gold
