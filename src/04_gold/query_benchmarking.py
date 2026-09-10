@@ -1,9 +1,9 @@
 # Databricks notebook source
-# MAGIC %md
-# MAGIC Execution Benchmarker
-
-# COMMAND ----------
-
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
+# Execution Benchmarker
 import time
 import re
 from pyspark.sql import SparkSession
@@ -74,11 +74,6 @@ class QueryExecutionBenchmarker:
 
 # Instantiate the benchmarker
 benchmarker = QueryExecutionBenchmarker(spark)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC Benchmarking Gold Aggregations & Liquid Clustering
 
 # COMMAND ----------
 
