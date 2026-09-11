@@ -23,7 +23,7 @@ def create_daily_user_metrics():
     """
     
     # Read from silver layer
-    silver_df = dlt.read("silver_clickstream")
+    silver_df = dlt.read("${var.catalog}.${var.schema_silver}.silver_clickstream")
     
     # Extract date from timestamp for daily aggregation
     df_with_date = silver_df.withColumn(
@@ -98,7 +98,7 @@ def create_product_daily_metrics():
     """
     
     # Read from silver layer
-    silver_df = dlt.read("silver_clickstream")
+    silver_df = dlt.read("${var.catalog}.${var.schema_silver}.silver_clickstream")
     
     # Extract date and calculate revenue
     df_prep = silver_df.withColumn(

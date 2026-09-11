@@ -1,1 +1,0 @@
-# Synthetic streaming generation engine

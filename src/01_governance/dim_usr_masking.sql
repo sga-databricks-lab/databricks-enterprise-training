@@ -3,7 +3,7 @@
 -- ============================================================================
 
 -- 1. Email Masking Function
-CREATE OR REPLACE FUNCTION workspace.default.mask_email(email STRING)
+CREATE OR REPLACE FUNCTION ${var.catalog}.default.mask_email(email STRING)
 RETURNS STRING
 COMMENT 'Masks email addresses for ALL users, showing only first 2 chars of username'
 RETURN CASE 
@@ -16,7 +16,7 @@ RETURN CASE
 END;
 
 -- 2. Credit Card Masking Function
-CREATE OR REPLACE FUNCTION workspace.default.mask_credit_card(card STRING)
+CREATE OR REPLACE FUNCTION ${var.catalog}.default.mask_credit_card(card STRING)
 RETURNS STRING
 COMMENT 'Masks credit card numbers for ALL users, showing only last 4 digits'
 RETURN CASE 
@@ -25,7 +25,7 @@ RETURN CASE
 END;
 
 -- 3. IP Address Masking Function
-CREATE OR REPLACE FUNCTION workspace.default.mask_ip(ip STRING)
+CREATE OR REPLACE FUNCTION ${var.catalog}.default.mask_ip(ip STRING)
 RETURNS STRING
 COMMENT 'Masks IP addresses for ALL users, showing only first and last octet'
 RETURN CASE 
@@ -37,7 +37,7 @@ RETURN CASE
 END;
 
 -- 4. Name Masking Function
-CREATE OR REPLACE FUNCTION workspace.default.mask_name(name STRING)
+CREATE OR REPLACE FUNCTION ${var.catalog}.default.mask_name(name STRING)
 RETURNS STRING
 COMMENT 'Masks names for ALL users, showing only first character'
 RETURN CASE 
@@ -46,7 +46,7 @@ RETURN CASE
 END;
 
 -- 5. User ID Partial Masking
-CREATE OR REPLACE FUNCTION workspace.default.mask_user_id(user_id STRING)
+CREATE OR REPLACE FUNCTION ${var.catalog}.default.mask_user_id(user_id STRING)
 RETURNS STRING
 COMMENT 'Partially masks user IDs for ALL users'
 RETURN CASE 
@@ -62,17 +62,17 @@ END;
 -- This ensures ALL users see masked data when querying this table
 
 -- Apply email masking
-ALTER TABLE workspace.default.dim_users 
-ALTER COLUMN email SET MASK workspace.default.mask_email;
+ALTER TABLE ${var.catalog}.${var.schema_bronze}.dim_users 
+ALTER COLUMN email SET MASK ${var.catalog}.default.mask_email;
 
 -- Apply credit card masking
-ALTER TABLE workspace.default.dim_users 
-ALTER COLUMN credit_card_num SET MASK workspace.default.mask_credit_card;
+ALTER TABLE ${var.catalog}.${var.schema_bronze}.dim_users 
+ALTER COLUMN credit_card_num SET MASK ${var.catalog}.default.mask_credit_card;
 
 -- Apply IP address masking
-ALTER TABLE workspace.default.dim_users 
-ALTER COLUMN ip_address SET MASK workspace.default.mask_ip;
+ALTER TABLE ${var.catalog}.${var.schema_bronze}.dim_users 
+ALTER COLUMN ip_address SET MASK ${var.catalog}.default.mask_ip;
 
 -- Apply name masking
-ALTER TABLE workspace.default.dim_users 
-ALTER COLUMN full_name SET MASK workspace.default.mask_name;
+ALTER TABLE ${var.catalog}.${var.schema_bronze}.dim_users 
+ALTER COLUMN full_name SET MASK ${var.catalog}.default.mask_name;

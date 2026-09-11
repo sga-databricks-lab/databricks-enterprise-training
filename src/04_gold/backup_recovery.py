@@ -31,8 +31,8 @@ TABLES: Dict[str, List[str]] = {
     "gold": ["gold_daily_user_metrics", "gold_product_daily_metrics"],
 }
 
-BACKUP_SCHEMA = "workspace.backup"
-CHECKPOINT_BASE = "/Volumes/workspace/default/raw_data/_checkpoints/streaming_backup"
+BACKUP_SCHEMA = "${var.catalog}.backup"
+CHECKPOINT_BASE = "/Volumes/${var.catalog}/${var.schema_bronze}/raw_data/_checkpoints/streaming_backup"
 
 
 class BackupPipeline:
@@ -46,7 +46,15 @@ class BackupPipeline:
     # ── helpers ──────────────────────────────────────────────────────
 
     def _src(self, table: str) -> str:
-        return f"workspace.default.{table}"
+        # Determine the layer (silver or gold) for the table
+        for layer, tables in self.tables.items():
+            if table in tables:
+                if layer == "silver":
+                    return f"${var.catalog}.${var.schema_silver}.{table}"
+                elif layer == "gold":
+                    return f"${var.catalog}.${var.schema_gold}.{table}"
+        # Fallback if table not found in TABLES dict
+        return f"${var.catalog}.default.{table}"
 
     def _bak(self, table: str) -> str:
         return f"{BACKUP_SCHEMA}.{table}"
@@ -277,8 +285,8 @@ if __name__ == "__main__":
     # pipeline.restore_all()
 
     # 6. Delta Time Travel
-    pipeline.history("silver_clickstream")
-    pipeline.rollback_to_version("silver_clickstream", 0)
+    # pipeline.history("silver_clickstream")
+    # pipeline.rollback_to_version("silver_clickstream", 0)
     # pipeline.rollback_to_timestamp("silver_clickstream", "2025-01-01")
 
     # 7. Streaming incremental (continuous, append-only)

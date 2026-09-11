@@ -26,11 +26,11 @@ def create_silver_cleaned():
     - Derived processing timestamp
     """
     
-    # Step 1: Read bronze stream
-    bronze_df = dlt.read_stream("bronze_clickstream_events")
+    # Step 1: Read bronze stream from bronze schema
+    bronze_df = dlt.read_stream("${var.catalog}.${var.schema_bronze}.bronze_clickstream_events")
     
-    # Step 2: Read dim_users as static dimension table
-    dim_users_df = dlt.read("dim_users")
+    # Step 2: Read dim_users as static dimension table from bronze schema
+    dim_users_df = dlt.read("${var.catalog}.${var.schema_bronze}.dim_users")
     
     # Step 3: Join bronze with dim_users (stream-static join)
     df = bronze_df.join(dim_users_df, "user_id", "left")
