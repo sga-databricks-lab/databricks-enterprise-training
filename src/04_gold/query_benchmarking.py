@@ -123,7 +123,7 @@ benchmarker.run_benchmark(
 # MAGIC %md
 # MAGIC ## Benchmark Analysis: Understanding the Two Tests
 # MAGIC
-# MAGIC ### 🔹 Test 1: Liquid Clustering Pruning Test
+# MAGIC ### Test 1: Liquid Clustering Pruning Test
 # MAGIC
 # MAGIC **Purpose**: Validates the effectiveness of Databricks Liquid Clustering for query performance optimization.
 # MAGIC
@@ -141,7 +141,7 @@ benchmarker.run_benchmark(
 # MAGIC
 # MAGIC ---
 # MAGIC
-# MAGIC ### 🔹 Test 2: Disaster Recovery Validation
+# MAGIC ### Test 2: Disaster Recovery Validation
 # MAGIC
 # MAGIC **Purpose**: Simulates a DR (Disaster Recovery) scenario to verify cross-table data integrity and completeness.
 # MAGIC
@@ -159,7 +159,7 @@ benchmarker.run_benchmark(
 # MAGIC
 # MAGIC ---
 # MAGIC
-# MAGIC ### 🔄 Key Differences Between the Two Tests
+# MAGIC ### Key Differences Between the Two Tests
 # MAGIC
 # MAGIC | Aspect | Liquid Clustering Test | DR Validation Test |
 # MAGIC |--------|------------------------|--------------------|
