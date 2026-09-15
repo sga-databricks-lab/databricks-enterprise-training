@@ -119,3 +119,71 @@ benchmarker.run_benchmark(
 
 # COMMAND ----------
 
+# DBTITLE 1,Benchmark Analysis & Comparison
+# MAGIC %md
+# MAGIC ## Benchmark Analysis: Understanding the Two Tests
+# MAGIC
+# MAGIC ### 🔹 Test 1: Liquid Clustering Pruning Test
+# MAGIC
+# MAGIC **Purpose**: Validates the effectiveness of Databricks Liquid Clustering for query performance optimization.
+# MAGIC
+# MAGIC **What it does**:
+# MAGIC * Queries the `bronze_clickstream_events` table with filters on **clustered columns** (`product_id` and `event_type`)
+# MAGIC * Specifically targets 3 products (`PROD_10`, `PROD_25`, `PROD_50`) and one event type (`purchase`)
+# MAGIC * Performs aggregations: counts unique sessions, sums quantities, and averages prices
+# MAGIC
+# MAGIC **Key Metrics to Watch**:
+# MAGIC * **Files Pruned %**: Should be HIGH (60%+) because Liquid Clustering organizes data by `product_id` and `event_type`, allowing Spark to skip irrelevant files
+# MAGIC * **Bytes Scanned**: Should be LOW relative to total table size
+# MAGIC * **Execution Time**: Should be FAST due to efficient file pruning
+# MAGIC
+# MAGIC **Success Indicator**: High file pruning percentage means Liquid Clustering is working effectively!
+# MAGIC
+# MAGIC ---
+# MAGIC
+# MAGIC ### 🔹 Test 2: Disaster Recovery Validation
+# MAGIC
+# MAGIC **Purpose**: Simulates a DR (Disaster Recovery) scenario to verify cross-table data integrity and completeness.
+# MAGIC
+# MAGIC **What it does**:
+# MAGIC * Performs a JOIN between `bronze_clickstream_events` and `dim_users` tables
+# MAGIC * Aggregates **per-user metrics**: total events, latest event timestamp, and total spend
+# MAGIC * Tests that data relationships are intact across tables (e.g., after a regional failover)
+# MAGIC
+# MAGIC **Key Metrics to Watch**:
+# MAGIC * **Files Pruned %**: Typically LOWER than Test 1 because it's a full table scan with JOIN
+# MAGIC * **Bytes Scanned**: HIGHER than Test 1 (scanning both tables)
+# MAGIC * **Execution Time**: SLOWER due to JOIN and no targeted filtering on clustered columns
+# MAGIC
+# MAGIC **Success Indicator**: Query completes successfully with accurate aggregations, proving data integrity across tables.
+# MAGIC
+# MAGIC ---
+# MAGIC
+# MAGIC ### 🔄 Key Differences Between the Two Tests
+# MAGIC
+# MAGIC | Aspect | Liquid Clustering Test | DR Validation Test |
+# MAGIC |--------|------------------------|--------------------|
+# MAGIC | **Query Pattern** | Selective filter on clustered columns | Full table scan with JOIN |
+# MAGIC | **Primary Goal** | Test query optimization via clustering | Verify cross-table data integrity |
+# MAGIC | **File Pruning** | HIGH (60%+ expected) | LOW (minimal pruning) |
+# MAGIC | **Bytes Scanned** | LOW (targeted subset) | HIGH (full tables) |
+# MAGIC | **Execution Time** | FAST (optimized path) | SLOWER (complex JOIN) |
+# MAGIC | **Use Case** | Real-time analytics, dashboards | Backup/restore validation, DR drills |
+# MAGIC | **Tables Involved** | 1 table (bronze_clickstream_events) | 2 tables (events + dim_users) |
+# MAGIC
+# MAGIC ---
+# MAGIC
+# MAGIC ### Interpreting Your Results
+# MAGIC
+# MAGIC **If Test 1 shows poor file pruning (<30%)**:
+# MAGIC * Liquid Clustering may not be enabled or optimized on the table
+# MAGIC * Consider running `OPTIMIZE <table> WHERE <condition>` with `CLUSTER BY`
+# MAGIC
+# MAGIC **If Test 2 is significantly slower than expected**:
+# MAGIC * Check if `dim_users` table has appropriate partitioning or indexing
+# MAGIC * Verify broadcast join hints if `dim_users` is small
+# MAGIC * Ensure network connectivity between regions for DR scenarios
+# MAGIC
+
+# COMMAND ----------
+
