@@ -7,7 +7,7 @@
 # ============================================================================
 
 import dlt
-from pyspark.sql.functions import col, trim, upper, when, to_timestamp
+from pyspark.sql.functions import col, trim, upper, when, to_timestamp, count, countDistinct, sum, avg
 
 # ============================================================================
 # SILVER TABLE: CLEAN CLICKSTREAM EVENTS
@@ -30,7 +30,6 @@ from pyspark.sql.functions import col, trim, upper, when, to_timestamp
 )
 @dlt.expect_or_drop("valid_event_id", "event_id IS NOT NULL")
 @dlt.expect_or_drop("valid_user_id", "user_id IS NOT NULL")
-@dlt.expect("valid_email", "email LIKE '%@%'")
 @dlt.expect("positive_price", "unit_price >= 0")
 def silver_clean_events():
     """
@@ -50,18 +49,12 @@ def silver_clean_events():
         .select(
             col("event_id"),
             col("user_id"),
-            trim(col("email")).alias("email"),
             col("session_id"),
             upper(trim(col("event_type"))).alias("event_type"),  # Standardize to uppercase
             col("product_id"),
             col("quantity"),
             col("unit_price"),
-            to_timestamp(col("event_timestamp")).alias("event_timestamp"),
-            col("page_url"),
-            col("user_agent"),
-            col("ip_address"),
-            col("country"),
-            col("city")
+            to_timestamp(col("event_timestamp")).alias("event_timestamp")
         )
     )
 
@@ -92,13 +85,9 @@ def silver_product_metrics():
         dlt.read("clean_events")
         .groupBy("product_id", "event_type")
         .agg(
-            {"event_id": "count",
-             "user_id": "countDistinct",
-             "quantity": "sum",
-             "unit_price": "avg"}
+            count("event_id").alias("event_count"),
+            countDistinct("user_id").alias("unique_users"),
+            sum("quantity").alias("total_quantity"),
+            avg("unit_price").alias("avg_price")
         )
-        .withColumnRenamed("count(event_id)", "event_count")
-        .withColumnRenamed("count(DISTINCT user_id)", "unique_users")
-        .withColumnRenamed("sum(quantity)", "total_quantity")
-        .withColumnRenamed("avg(unit_price)", "avg_price")
     )
