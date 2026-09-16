@@ -24,7 +24,7 @@ resources:
       name: ${bundle.target}-silver-cleanse-pipeline
       catalog: ${var.catalog}
       target: ${var.schema_silver}
-      continuous: true
+      continuous: false
       serverless: true
       libraries:
         - file:
@@ -36,7 +36,8 @@ resources:
       environments:
         - environment_key: serverless_env
           spec:
-            client: "1"
+            environment_version: "5"
+            dependencies: []
       tasks:
         - task_key: stream_simulator
           environment_key: serverless_env
