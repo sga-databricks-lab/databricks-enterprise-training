@@ -10,7 +10,4 @@ targets:
       schema_bronze: prod_bronze
       schema_silver: prod_silver
       schema_gold: prod_gold
-    run_as:
-      # Service principal for production deployments
-      # user_name: service-principal@example.com
-      service_principal_name: ${var.service_principal_name}
+    
