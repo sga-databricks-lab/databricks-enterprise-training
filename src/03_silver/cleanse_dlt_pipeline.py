@@ -1,6 +1,25 @@
+"""
+Silver Layer DLT Pipeline
+
+Cleans and enriches bronze clickstream data:
+- Streams from bronze layer
+- Joins with dimension tables
+- Applies data quality checks
+- Deduplicates events using watermark
+- Outputs to silver layer with liquid clustering
+"""
+
 import dlt
 from pyspark.sql import functions as F
 from pyspark.sql.types import DecimalType
+
+# Read configuration from DLT pipeline or use defaults
+try:
+    CATALOG = spark.conf.get("catalog", "dev")
+    SCHEMA_BRONZE = spark.conf.get("schema_bronze", "bronze")
+except:
+    CATALOG = "dev"
+    SCHEMA_BRONZE = "bronze"
 
 @dlt.table(
     name="silver_clickstream",
@@ -18,40 +37,34 @@ from pyspark.sql.types import DecimalType
 @dlt.expect_or_drop("valid_event_timestamp", "event_timestamp IS NOT NULL")
 def create_silver_cleaned():
     """
-    Create cleaned silver layer with DLT streaming:
-    - Stream from bronze using DLT streaming
-    - Join with dim_users
-    - Data quality checks via expectations (drop invalid records)
-    - Deduplication with streaming window
-    - Derived processing timestamp
+    Create cleaned silver layer with streaming data quality and deduplication.
+    
+    Quality checks drop invalid records (negative prices, missing IDs, etc.).
+    Deduplication uses watermark to handle late-arriving events efficiently.
     """
+    # Read bronze stream
+    bronze_df = dlt.read_stream(f"{CATALOG}.{SCHEMA_BRONZE}.bronze_clickstream_events")
     
-    # Step 1: Read bronze stream
-    bronze_df = dlt.read_stream("bronze_clickstream_events")
+    # Read dimension table
+    dim_users_df = dlt.read(f"{CATALOG}.{SCHEMA_BRONZE}.dim_users")
     
-    # Step 2: Read dim_users as static dimension table
-    dim_users_df = dlt.read("dim_users")
-    
-    # Step 3: Join bronze with dim_users (stream-static join)
+    # Enrich with user dimension (stream-static join)
     df = bronze_df.join(dim_users_df, "user_id", "left")
     
-    # Step 4: Cast columns to proper types for quality checks
-    # (Expectations will filter these automatically)
+    # Cast columns to proper types for quality expectations
     df = df.withColumn("quantity", F.col("quantity").cast("int")) \
-           .withColumn("unit_price", F.col("unit_price").cast("double"))
+           .withColumn("unit_price", F.col("unit_price").cast("double")) \
+           .withColumn("event_timestamp", F.col("event_timestamp").cast("timestamp"))
     
-    # Step 5: STREAMING DEDUPLICATION with Watermark
-    # Apply watermark for handling late data (5 minutes)
+    # Apply watermark for late data (5 minute grace period)
     df_with_watermark = df.withWatermark("event_timestamp", "5 minutes")
     
-    # Deduplication: Keep latest record per event_id within watermark window
-    # dropDuplicatesWithinWatermark is optimized for streaming and uses watermark
+    # Deduplicate events within watermark window (keeps first occurrence)
     df_deduped = df_with_watermark.dropDuplicatesWithinWatermark(
-        ["event_id"], 
-        orderBy=F.col("_ingested_at").desc()
+        ["event_id"]
     )
     
-    # Step 6: Add processing timestamp
+    # Add processing timestamp for lineage tracking
     df_final = df_deduped.withColumn(
         "processing_timestamp",
         F.current_timestamp()

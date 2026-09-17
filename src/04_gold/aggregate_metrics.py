@@ -1,6 +1,24 @@
+"""
+Gold Layer Aggregation Metrics
+
+Creates analytics-ready aggregated tables from silver layer data:
+- gold_daily_user_metrics: Daily user activity and revenue metrics
+- gold_product_daily_metrics: Daily product performance metrics
+
+Both tables use liquid clustering for optimal query performance.
+"""
+
 import dlt
 from pyspark.sql import functions as F
 from pyspark.sql.types import DecimalType
+
+# Read configuration from DLT pipeline or use defaults
+try:
+    CATALOG = spark.conf.get("catalog", "dev")
+    SCHEMA_SILVER = spark.conf.get("schema_silver", "silver")
+except:
+    CATALOG = "dev"
+    SCHEMA_SILVER = "silver"
 
 @dlt.table(
     name="gold_daily_user_metrics",
@@ -16,30 +34,28 @@ from pyspark.sql.types import DecimalType
 @dlt.expect("reasonable_revenue", "total_revenue >= 0")
 def create_daily_user_metrics():
     """
-    Gold layer: Daily user metrics aggregated from silver layer
-    - Liquid clustering by event_date and user_id for optimal query performance
-    - Aggregates: total events, revenue, purchases, avg order value
-    - Data quality: ensures valid dates, users, and non-negative revenue
+    Create daily user metrics aggregated from silver layer.
+    
+    Includes event counts, revenue metrics, product metrics, and conversion rates.
+    Liquid clustering optimizes queries filtering by event_date and user_id.
     """
+    # Read silver layer data
+    silver_df = dlt.read(f"{CATALOG}.{SCHEMA_SILVER}.silver_clickstream")
     
-    # Read from silver layer
-    silver_df = dlt.read("silver_clickstream")
-    
-    # Extract date from timestamp for daily aggregation
+    # Extract event date for daily aggregation
     df_with_date = silver_df.withColumn(
         "event_date", 
         F.to_date(F.col("event_timestamp"))
     )
     
-    # Calculate revenue (quantity * unit_price)
+    # Calculate revenue per event
     df_with_revenue = df_with_date.withColumn(
         "revenue",
         (F.col("quantity") * F.col("unit_price")).cast(DecimalType(18, 2))
     )
     
-    # Aggregate daily metrics by user
+    # Aggregate metrics by date and user
     daily_metrics = df_with_revenue.groupBy("event_date", "user_id").agg(
-        # Event counts
         F.count("*").alias("total_events"),
         F.sum(F.when(F.col("event_type") == "view", 1).otherwise(0)).alias("view_count"),
         F.sum(F.when(F.col("event_type") == "cart", 1).otherwise(0)).alias("cart_count"),
@@ -62,7 +78,7 @@ def create_daily_user_metrics():
         F.max("event_timestamp").alias("last_event_time")
     )
     
-    # Calculate conversion rate (purchases / views)
+    # Calculate conversion rate
     daily_metrics_final = daily_metrics.withColumn(
         "conversion_rate",
         F.when(
@@ -71,7 +87,7 @@ def create_daily_user_metrics():
         ).otherwise(0)
     )
     
-    # Add processing metadata
+    # Add processing timestamp
     result = daily_metrics_final.withColumn(
         "processed_at",
         F.current_timestamp()
@@ -92,15 +108,15 @@ def create_daily_user_metrics():
 @dlt.expect_or_drop("valid_product_date", "event_date IS NOT NULL AND product_id IS NOT NULL")
 def create_product_daily_metrics():
     """
-    Gold layer: Daily product performance metrics
-    - Liquid clustering by event_date and product_id
-    - Tracks product views, purchases, and revenue
+    Create daily product performance metrics.
+    
+    Tracks views, purchases, revenue, and conversion funnel metrics.
+    Liquid clustering optimizes queries filtering by event_date and product_id.
     """
+    # Read silver layer data
+    silver_df = dlt.read(f"{CATALOG}.{SCHEMA_SILVER}.silver_clickstream")
     
-    # Read from silver layer
-    silver_df = dlt.read("silver_clickstream")
-    
-    # Extract date and calculate revenue
+    # Extract event date and calculate revenue
     df_prep = silver_df.withColumn(
         "event_date", 
         F.to_date(F.col("event_timestamp"))
@@ -109,9 +125,8 @@ def create_product_daily_metrics():
         (F.col("quantity") * F.col("unit_price")).cast(DecimalType(18, 2))
     )
     
-    # Aggregate by product and date
+    # Aggregate metrics by date and product
     product_metrics = df_prep.groupBy("event_date", "product_id").agg(
-        # Event counts by type
         F.sum(F.when(F.col("event_type") == "view", 1).otherwise(0)).alias("view_count"),
         F.sum(F.when(F.col("event_type") == "cart", 1).otherwise(0)).alias("cart_count"),
         F.sum(F.when(F.col("event_type") == "purchase", 1).otherwise(0)).alias("purchase_count"),
