@@ -1,39 +1,53 @@
-# Databricks notebook source
-# MAGIC %md
-# MAGIC Execution Benchmarker
+"""
+Query Execution Benchmarking Tool
 
-# COMMAND ----------
+Benchmarks query performance by measuring execution time, bytes scanned, file pruning,
+and memory/disk spills. Uses noop sink to avoid write overhead during testing.
+"""
+
+# Read parameters from widgets or bundle configuration
+dbutils.widgets.text("catalog", "dev", "Catalog name (dev or prod)")
+dbutils.widgets.text("schema_bronze", "bronze", "Bronze schema name")
+dbutils.widgets.text("schema_silver", "silver", "Silver schema name")
+dbutils.widgets.text("schema_gold", "gold", "Gold schema name")
+
+CATALOG = dbutils.widgets.get("catalog")
+SCHEMA_BRONZE = dbutils.widgets.get("schema_bronze")
+SCHEMA_SILVER = dbutils.widgets.get("schema_silver")
+SCHEMA_GOLD = dbutils.widgets.get("schema_gold")
 
 import time
 import re
 from pyspark.sql import SparkSession
 
+
 class QueryExecutionBenchmarker:
+    """Benchmark query execution and extract performance metrics from explain plans."""
     def __init__(self, spark: SparkSession):
         self.spark = spark
 
     def _sanitize_sql(self, raw_sql: str) -> str:
-        """Strips all hidden Unicode, non-ASCII characters, and trailing semicolons."""
-        # Replace non-ASCII characters with standard spaces
+        """Sanitize SQL by removing non-ASCII characters and trailing semicolons."""
+        # Replace non-ASCII characters with spaces
         clean = re.sub(r'[^\x00-\x7F]+', ' ', raw_sql)
-        # Collapse multiple spaces and newlines into single spaces
+        # Normalize whitespace
         clean = re.sub(r'\s+', ' ', clean).strip()
-        # Remove trailing semicolon if present
         if clean.endswith(';'):
             clean = clean[:-1]
         return clean
 
     def run_benchmark(self, query_sql: str, test_name: str = "Gold Layer Query Execution"):
+        """Execute query and collect performance metrics."""
         clean_query = self._sanitize_sql(query_sql)
         start_time = time.time()
         
-        # Execute query against noop sink
+        # Execute query using noop sink to avoid write overhead
         df = self.spark.sql(clean_query)
         df.write.format("noop").mode("overwrite").save()
         
         total_time = round(time.time() - start_time, 2)
         
-        # Extract physical execution plan
+        # Extract metrics from physical execution plan
         explain_plan = self.spark.sql(f"EXPLAIN {clean_query}").collect()[0][0]
         
         metrics = self._parse_metrics(explain_plan)
@@ -44,6 +58,7 @@ class QueryExecutionBenchmarker:
         return metrics
 
     def _parse_metrics(self, plan_text: str) -> dict:
+        """Extract performance metrics from query execution plan."""
         bytes_read = re.search(r"size of files read:\s*([\d\.]+\s*[KMGT]?B)", plan_text, re.IGNORECASE)
         files_read = re.search(r"number of files read:\s*(\d+)", plan_text, re.IGNORECASE)
         files_pruned = re.search(r"files pruned:\s*(\d+)", plan_text, re.IGNORECASE)
@@ -59,6 +74,7 @@ class QueryExecutionBenchmarker:
         }
 
     def _print_report(self, m: dict):
+        """Print formatted benchmark report."""
         total_files = m["files_read"] + m["files_pruned"]
         prune_pct = round((m["files_pruned"] / total_files * 100), 2) if total_files > 0 else 0.0
         
@@ -72,26 +88,18 @@ class QueryExecutionBenchmarker:
         print(f" Disk Spill          : {m['disk_spilled']}")
         print("=" * 60 + "\n")
 
-# Instantiate the benchmarker
+# Initialize benchmarker
 benchmarker = QueryExecutionBenchmarker(spark)
 
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC Benchmarking Gold Aggregations & Liquid Clustering
-
-# COMMAND ----------
-
-# 1. Liquid Clustering Pruning Test
-# Targets specific clustered columns (product_id & event_type) to verify file pruning performance
-liquid_clustering_query = """
+# Test 1: Liquid Clustering - verify file pruning on clustered columns (product_id, event_type)
+liquid_clustering_query = f"""
 SELECT 
     product_id,
     event_type,
     COUNT(DISTINCT session_id) as unique_sessions,
     SUM(CAST(quantity AS INT)) as total_qty,
     ROUND(AVG(CAST(unit_price AS DOUBLE)), 2) as avg_unit_price
-FROM workspace.default.bronze_clickstream_events
+FROM {CATALOG}.{SCHEMA_BRONZE}.bronze_clickstream_events
 WHERE product_id IN ('PROD_10', 'PROD_25', 'PROD_50')
   AND event_type = 'purchase'
 GROUP BY product_id, event_type
@@ -102,17 +110,16 @@ benchmarker.run_benchmark(
     test_name="Gold Aggregation - Liquid Clustering Active"
 )
 
-# 2. Disaster Recovery Validation
-# Tests cross-table integrity with dim_users, event counts, and total spend for region parity
-dr_failover_query = """
+# Test 2: Disaster Recovery - validate cross-table integrity and region parity
+dr_failover_query = f"""
 SELECT 
     u.user_id,
     u.email,
     COUNT(e.event_id) as total_user_events,
     MAX(e.event_timestamp) as latest_event_timestamp,
     ROUND(SUM(CASE WHEN e.event_type = 'purchase' THEN CAST(e.quantity AS INT) * CAST(e.unit_price AS DOUBLE) ELSE 0 END), 2) as total_spend
-FROM workspace.default.bronze_clickstream_events e
-JOIN workspace.default.dim_users u
+FROM {CATALOG}.{SCHEMA_BRONZE}.bronze_clickstream_events e
+JOIN {CATALOG}.{SCHEMA_BRONZE}.dim_users u
   ON e.user_id = u.user_id
 GROUP BY u.user_id, u.email
 """
@@ -122,5 +129,5 @@ benchmarker.run_benchmark(
     test_name="Disaster Recovery - Secondary Region Parity Check"
 )
 
-# COMMAND ----------
+
 

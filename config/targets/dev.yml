@@ -3,10 +3,12 @@ targets:
     mode: development
     default: true
     workspace:
-      host: https://dbc-c17268be-1c4c.cloud.databricks.com
+      host : https://dbc-a73655c8-8153.cloud.databricks.com
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundles/${bundle.name}/${bundle.target}
     variables:
-      catalog: workspace
-      schema_bronze: dev_bronze
-      schema_silver: dev_silver
-      schema_gold: dev_gold
+      environment: dev
+      catalog: dev
+      schema_bronze: bronze
+      schema_silver: silver
+      schema_gold: gold
+      warehouse_id: afb90bfccc65e2e0

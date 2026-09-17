@@ -5,9 +5,12 @@ include:
   - config/targets/*.yml
 
 variables:
+  environment:
+    description: Environment name (dev, prod)
+    default: dev
   catalog:
-    description: Target Unity Catalog name
-    default: workspace
+    description: Target Unity Catalog name (dev or prod)
+    default: dev
   schema_bronze:
     description: Bronze target schema
     default: bronze
@@ -17,21 +20,27 @@ variables:
   schema_gold:
     description: Gold target schema
     default: gold
+  warehouse_id:
+    description: SQL Warehouse ID for SQL tasks
+    default: ""
+  service_principal_name:
+    description: Service principal for production deployments
+    default: ""
 
 resources:
   pipelines:
     silver_dlt_pipeline:
-      name: ${bundle.target}-silver-cleanse-pipeline
+      name: ${var.environment}-silver-cleanse-pipeline
       catalog: ${var.catalog}
       target: ${var.schema_silver}
-      continuous: true
+      continuous: false
       serverless: true
       libraries:
         - file:
             path: ./src/03_silver/cleanse_dlt_pipeline.py
 
     gold_aggregation_pipeline:
-      name: ${bundle.target}-gold-aggregation-pipeline
+      name: ${var.environment}-gold-aggregation-pipeline
       catalog: ${var.catalog}
       target: ${var.schema_gold}
       continuous: false
@@ -42,26 +51,29 @@ resources:
 
   jobs:
     data_generator:
-      name: ${bundle.target}-data-generator-job
-      environments:
-        - environment_key: serverless_env
-          spec:
-            client: "1"
+      name: ${var.environment}-data-generator-job
+      # Notebook tasks automatically default to serverless when clusters are omitted.
+      # Left blank as no environment blocks are required for standard .ipynb runs.
       tasks:
         - task_key: generate_data
-          environment_key: serverless_env
-          spark_python_task:
-            python_file: ./utils/data_generator.py
+          notebook_task:
+            notebook_path: ./utils/data_generator.ipynb
+            base_parameters:
+              catalog: ${var.catalog}
+              schema_bronze: ${var.schema_bronze}
         - task_key: governance
-          environment_key: serverless_env
           depends_on:
             - task_key: generate_data
-          notebook_task:
-            notebook_path: ./src/01_governance/dim_usr_masking.sql
-
+          sql_task:
+            file:
+              path: ./src/01_governance/dim_usr_masking.sql
+            warehouse_id: ${var.warehouse_id}
+            parameters:
+              catalog: ${var.catalog}
+              schema_bronze: ${var.schema_bronze}
 
     medallion_orchestrator:
-      name: ${bundle.target}-medallion-pipeline-job
+      name: ${var.environment}-medallion-pipeline-job
       environments:
         - environment_key: serverless_env
           spec:
@@ -69,15 +81,23 @@ resources:
       tasks:
         - task_key: stream_simulator
           environment_key: serverless_env
-          spark_python_task:
-            python_file: ./utils/generate_new_batch.py
+          notebook_task:
+            notebook_path: ./utils/generate_new_batch.ipynb
+            base_parameters:
+              catalog: ${var.catalog}
+              schema_bronze: ${var.schema_bronze}
 
         - task_key: bronze_ingestion
           environment_key: serverless_env
           depends_on:
             - task_key: stream_simulator
-          notebook_task:
-            notebook_path: ./src/02_bronze/ingest_raw_events.py
+          spark_python_task:
+            python_file: ./src/02_bronze/ingest_raw_events.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--schema_bronze"
+              - "${var.schema_bronze}"
 
         - task_key: silver_pipeline
           pipeline_task:
@@ -92,25 +112,45 @@ resources:
             - task_key: silver_pipeline
 
     backup_recovery:
-      name: ${bundle.target}-backup-recovery-job
+      name: ${var.environment}-backup-recovery-job
       environments:
         - environment_key: serverless_env
           spec:
-            client: "1"
+            client: "2"
       tasks:
         - task_key: create_backups
           environment_key: serverless_env
           spark_python_task:
             python_file: ./src/04_gold/backup_recovery.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--schema_bronze"
+              - "${var.schema_bronze}"
+              - "--schema_silver"
+              - "${var.schema_silver}"
+              - "--schema_gold"
+              - "${var.schema_gold}"
+
 
     query_validation:
-      name: ${bundle.target}-query-validation-job
+      name: ${var.environment}-query-validation-job
       environments:
         - environment_key: serverless_env
           spec:
-            client: "1"
+            client: "2"
       tasks:
         - task_key: run_benchmarks
           environment_key: serverless_env
-          notebook_task:
-            notebook_path: ./src/04_gold/query_benchmarking.py
+          # FIXED: Corrected task type mapping to spark_python_task for .py script 
+          spark_python_task:
+            python_file: ./src/04_gold/query_benchmarking.py
+            parameters:
+              - "--catalog"
+              - "${var.catalog}"
+              - "--schema_bronze"
+              - "${var.schema_bronze}"
+              - "--schema_silver"
+              - "${var.schema_silver}"
+              - "--schema_gold"
+              - "${var.schema_gold}"

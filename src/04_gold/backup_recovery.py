@@ -1,38 +1,60 @@
 """
 Backup & Recovery for Silver and Gold tables using DEEP CLONE.
 
+This module provides comprehensive backup and recovery capabilities for Delta tables
+using DEEP CLONE for efficient incremental backups, Delta Time Travel for version control,
+and streaming backups for continuous data protection.
+
 Usage:
     pipeline = BackupPipeline()
-    pipeline.create()           # Initial deep clone of all tables
-    pipeline.sync()             # Incremental sync (scheduled job)
-    pipeline.verify()           # Check row counts and schema match
+    
+    # Initial setup
+    pipeline.create()           # Create initial deep clone backups
+    pipeline.sync()             # Incremental sync (schedule as a recurring job)
+    pipeline.verify()           # Verify backup integrity
     pipeline.list_backups()     # Show backup status
-    pipeline.restore_all()      # Disaster recovery from backup
-
-    # Delta Time Travel:
-    pipeline.history("silver_clickstream")           # Show version history
-    # pipeline.rollback_to_version("silver_clickstream", 0)
-    # pipeline.rollback_to_timestamp("silver_clickstream", "2025-01-01")
-
-    # Streaming (continuous, append-only -- captures new inserts, not updates/deletes):
+    
+    # Disaster recovery
+    pipeline.restore_all()      # Restore all tables from backup
+    
+    # Delta Time Travel for version control
+    pipeline.history("silver_clickstream")
+    pipeline.rollback_to_version("silver_clickstream", 0)
+    pipeline.rollback_to_timestamp("silver_clickstream", "2025-01-01")
+    
+    # Streaming backups (append-only, does not capture updates/deletes)
     pipeline.start_streaming()
     pipeline.stop_streaming()
 """
 
+import argparse
 from typing import Dict, List, Optional
 
 from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description="Backup and Recovery for Delta tables")
+parser.add_argument("--catalog", type=str, default="dev", help="Catalog name (dev or prod)")
+parser.add_argument("--schema_bronze", type=str, default="bronze", help="Bronze schema name")
+parser.add_argument("--schema_silver", type=str, default="silver", help="Silver schema name")
+parser.add_argument("--schema_gold", type=str, default="gold", help="Gold schema name")
+args, unknown = parser.parse_known_args()
 
-# Tables to back up, grouped by layer
+# Set configuration from arguments
+CATALOG = args.catalog
+SCHEMA_BRONZE = args.schema_bronze
+SCHEMA_SILVER = args.schema_silver
+SCHEMA_GOLD = args.schema_gold
+
+# Define tables to back up, organized by medallion layer
 TABLES: Dict[str, List[str]] = {
     "silver": ["silver_clickstream"],
     "gold": ["gold_daily_user_metrics", "gold_product_daily_metrics"],
 }
 
-BACKUP_SCHEMA = "${var.catalog}.backup"
-CHECKPOINT_BASE = "/Volumes/${var.catalog}/${var.schema_bronze}/raw_data/_checkpoints/streaming_backup"
+BACKUP_SCHEMA = f"{CATALOG}.backup"
+CHECKPOINT_BASE = f"/Volumes/{CATALOG}/{SCHEMA_BRONZE}/raw_data/_checkpoints/streaming_backup"
 
 
 class BackupPipeline:
@@ -43,18 +65,17 @@ class BackupPipeline:
         self.tables = tables or TABLES
         self._streams: Dict[str, object] = {}  # table_name -> StreamingQuery
 
-    # ── helpers ──────────────────────────────────────────────────────
+    # Helper methods
 
     def _src(self, table: str) -> str:
-        # Determine the layer (silver or gold) for the table
+        """Get the full source table path based on its layer."""
         for layer, tables in self.tables.items():
             if table in tables:
                 if layer == "silver":
-                    return f"${var.catalog}.${var.schema_silver}.{table}"
+                    return f"{CATALOG}.{SCHEMA_SILVER}.{table}"
                 elif layer == "gold":
-                    return f"${var.catalog}.${var.schema_gold}.{table}"
-        # Fallback if table not found in TABLES dict
-        return f"${var.catalog}.default.{table}"
+                    return f"{CATALOG}.{SCHEMA_GOLD}.{table}"
+        return f"{CATALOG}.default.{table}"
 
     def _bak(self, table: str) -> str:
         return f"{BACKUP_SCHEMA}.{table}"
@@ -82,7 +103,18 @@ class BackupPipeline:
             for table in tables:
                 yield table, layer
 
-    # ── 1. Create initial DEEP CLONE backup ──────────────────────────
+    def _is_cloneable(self, table: str) -> bool:
+        """Check if a table supports DEEP CLONE (not a streaming table or materialized view)."""
+        try:
+            rows = self.spark.sql(f"DESCRIBE TABLE EXTENDED {table}").collect()
+            for row in rows:
+                if row[0] == "Type" and row[1] in ("STREAMING_TABLE", "MATERIALIZED_VIEW"):
+                    return False
+            return True
+        except Exception:
+            return True
+
+    # Create initial DEEP CLONE backups
 
     def create(self) -> None:
         """Initial DEEP CLONE of all tables. Skips tables that already have a backup."""
@@ -94,11 +126,14 @@ class BackupPipeline:
                 print(f"  SKIP  {table} — source does not exist")
             elif self._exists(bak):
                 print(f"  SKIP  {table} — backup already exists (use sync())")
+            elif not self._is_cloneable(src):
+                self.spark.sql(f"CREATE TABLE {bak} AS SELECT * FROM {src}")
+                print(f"  OK    {table} — copied via CTAS ({self._count(bak)} rows)")
             else:
                 self.spark.sql(f"CREATE TABLE {bak} DEEP CLONE {src}")
                 print(f"  OK    {table} — cloned ({self._count(bak)} rows)")
 
-    # ── 2. Incremental sync ───────────────────────────────────────────
+    # Incremental sync
 
     def sync(self) -> None:
         """Incremental DEEP CLONE sync — only copies new/changed Delta files."""
@@ -109,10 +144,14 @@ class BackupPipeline:
             if not self._exists(src):
                 print(f"  SKIP  {table} — source does not exist")
                 continue
-            self.spark.sql(f"CREATE OR REPLACE TABLE {bak} DEEP CLONE {src}")
-            print(f"  OK    {table} — synced (source={self._count(src)}, backup={self._count(bak)})")
+            if not self._is_cloneable(src):
+                self.spark.sql(f"CREATE OR REPLACE TABLE {bak} AS SELECT * FROM {src}")
+                print(f"  OK    {table} — synced via CTAS (source={self._count(src)}, backup={self._count(bak)})")
+            else:
+                self.spark.sql(f"CREATE OR REPLACE TABLE {bak} DEEP CLONE {src}")
+                print(f"  OK    {table} — synced (source={self._count(src)}, backup={self._count(bak)})")
 
-    # ── 3. Restore from backup ────────────────────────────────────────
+    # Restore from backup
 
     def restore(self, table: str) -> None:
         """Restore a single table from its backup clone."""
@@ -131,7 +170,7 @@ class BackupPipeline:
             else:
                 print(f"  SKIP  {table} — no backup exists")
 
-    # ── 4. Verify backup integrity ─────────────────────────────────────
+    # Verify backup integrity
 
     def verify(self) -> None:
         """Compare row counts and schema between source and backup."""
@@ -154,7 +193,7 @@ class BackupPipeline:
             else:
                 print(f"  FAIL  {table} — both rows and schema differ")
 
-    # ── 5. List backups ───────────────────────────────────────────────
+    # List backups
 
     def list_backups(self) -> None:
         """Show all backup tables with row counts and last sync time."""
@@ -170,7 +209,7 @@ class BackupPipeline:
                 ts = "unknown"
             print(f"  [OK] {table} [{layer}] — rows={rows}, last_sync={ts}")
 
-    # -- 6. Delta Time Travel ------------------------------------------
+    # Delta Time Travel
 
     def history(self, table: str) -> None:
         """Show Delta version history (version, timestamp, operation) for a table.
@@ -207,7 +246,7 @@ class BackupPipeline:
         print(f"    {sql}")
         return sql
 
-    # -- 7. Streaming incremental backup --------------------------------─
+    # Streaming incremental backup
 
     def start_streaming(self) -> None:
         """
@@ -227,12 +266,16 @@ class BackupPipeline:
                 print(f"  SKIP  {table} — stream already active")
                 continue
 
-            # Create baseline if backup doesn't exist yet
+            # Create baseline backup if it doesn't exist
             if not self._exists(bak):
-                self.spark.sql(f"CREATE TABLE {bak} DEEP CLONE {src}")
-                print(f"  Baseline clone created for {table} ({self._count(bak)} rows)")
+                if not self._is_cloneable(src):
+                    self.spark.sql(f"CREATE TABLE {bak} AS SELECT * FROM {src}")
+                    print(f"  Baseline CTAS created for {table} ({self._count(bak)} rows)")
+                else:
+                    self.spark.sql(f"CREATE TABLE {bak} DEEP CLONE {src}")
+                    print(f"  Baseline clone created for {table} ({self._count(bak)} rows)")
 
-            # Stream only new rows (startingVersion=latest skips the baseline data)
+            # Stream only new rows using startingVersion=latest to skip baseline data
             query = (
                 self.spark.readStream
                 .option("startingVersion", "latest")
@@ -269,27 +312,27 @@ class BackupPipeline:
 if __name__ == "__main__":
     pipeline = BackupPipeline()
 
-    # 1. Create initial backups
+    # Create initial backups
     pipeline.create()
 
-    # 2. Verify integrity
+    # Verify integrity
     pipeline.verify()
 
-    # 3. List all backups
+    # List all backups
     pipeline.list_backups()
 
-    # 4. Incremental sync (schedule this as a recurring job)
+    # Incremental sync (schedule this as a recurring job)
     pipeline.sync()
 
-    # 5. Disaster recovery
+    # Uncomment for disaster recovery
     # pipeline.restore_all()
 
-    # 6. Delta Time Travel
+    # Uncomment for Delta Time Travel
     # pipeline.history("silver_clickstream")
     # pipeline.rollback_to_version("silver_clickstream", 0)
     # pipeline.rollback_to_timestamp("silver_clickstream", "2025-01-01")
 
-    # 7. Streaming incremental (continuous, append-only)
+    # Uncomment for streaming backups
     # pipeline.start_streaming()
     # pipeline.list_streams()
     # pipeline.stop_streaming()
