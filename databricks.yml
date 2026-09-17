@@ -77,7 +77,7 @@ resources:
       environments:
         - environment_key: serverless_env
           spec:
-            client: "1"
+            client: "2"
       tasks:
         - task_key: stream_simulator
           environment_key: serverless_env
